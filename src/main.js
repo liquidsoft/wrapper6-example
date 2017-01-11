@@ -8,16 +8,29 @@ import {Application} from "wrapper6";
 Modules
  */
 
-import BodyTextModule from "./modules/body-text";
-import EventLoggerModule from "./modules/event-logger";
+import Index from "./modules/index";
+import Logger from "./modules/logger";
+import Messages from "./modules/messages";
 
 /*
 Bootstrap
 */
 
-var app = window.app = new Application({ bodyText: "Hello, this is an example" });
+var app = window.app = new Application({
 
-app.use("bodyText", BodyTextModule);    // Namespaced module
-app.use(EventLoggerModule);             // Anonymous module
+    logger: {
+        delay: 5000
+    },
 
-app.boot();
+    messages: {
+        list: [
+            "Hello",
+            "The messages module is now ready"
+        ]
+    }
+
+});
+
+app.use(Index);
+app.use(Messages);
+app.use("logger", Logger);      // A named module can be required as a dependency!
