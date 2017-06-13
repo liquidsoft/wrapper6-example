@@ -9,6 +9,7 @@ app.config.set({
     debug: true,
 
     // Amount of time in milliseconds until a package times out and throws and error (defaults: 5000)
+    // Setting this to false will cancel the timeouts
     package_timeout: 2500
 });
 
