@@ -1,6 +1,6 @@
 {
   "name": "wrapper6-example",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "",
   "main": "gulpfile.js",
   "scripts": {
@@ -29,6 +29,6 @@
     "gulp-watch": "^4.3.11",
     "vinyl-buffer": "^1.0.0",
     "vinyl-source-stream": "^1.1.0",
-    "wrapper6": "0.2.13"
+    "wrapper6": "0.3.14"
   }
 }

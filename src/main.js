@@ -1,36 +1,29 @@
-/*
-Dependecies
- */
+const app = require("wrapper6");
 
-import {Application} from "wrapper6";
+// Globalize wrapper as app (for dev purpose)
+window.app = app;
 
-/*
-Modules
- */
+// Wrapper 6 configuration
+app.config.set({
+    // Specifies whether to log errors to console or not (defaults: true)
+    debug: true,
 
-import Index from "./modules/index";
-import Logger from "./modules/logger";
-import Messages from "./modules/messages";
-
-/*
-Bootstrap
-*/
-
-var app = window.app = new Application({
-
-    logger: {
-        delay: 5000
-    },
-
-    messages: {
-        list: [
-            "Hello",
-            "The messages module is now ready"
-        ]
-    }
-
+    // Amount of time in milliseconds until a package times out and throws and error (defaults: 5000)
+    package_timeout: 2500
 });
 
-app.use(Index);
-app.use(Messages);
-app.use("logger", Logger);      // A named module can be required as a dependency!
+// Passing options has been migrated from the app to modules
+// e.g.
+app.define("options", app.scope({
+    // put your options here
+}));
+
+// Load modules on document ready
+app.ready(() => {
+    // Document is ready here
+    // We must use node's require here because the es6 import is only allowed
+    // at the top of the document
+    require("./modules/index");
+    require("./modules/messages");
+    require("./modules/logger");
+});

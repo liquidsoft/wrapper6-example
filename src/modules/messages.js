@@ -1,37 +1,31 @@
-/*
- Dependencies
- */
-
-import {Module} from "wrapper6";
-import {Promise} from "es6-promise";
+const app = require("wrapper6");
 
 /*
- Module
+ -------------------------------
+ Name module with requirements registered using `define`
+ -------------------------------
  */
 
-export default class MessagesModule extends Module {
+app.define("messages", ["logger"], function ({logger}) {
 
-    boot( app ) {
-        // The messages module depend on the logger module to be booted
-        return app.require([ "logger" ]).then(({ logger }) => {
-            // Load some messages
-            return new Promise(( resolve ) => {
-                setTimeout(() => {
-                    resolve({
-                        logger: logger,
-                        messages: app.options.get("messages.list", [])
-                    });
+    // Define some messages
+    const messages = [
+        "Hello",
+        "How are you doing?"
+    ];
 
-                }, app.options.get("messages.delay", 2000));
-
+    // Define the module controller
+    const module = {
+        writeAll() {
+            messages.forEach((message) => {
+                logger.log(message);
             });
-        });
-    }
+        }
+    };
 
-    ready( app, { logger, messages }) {
-        messages.forEach((message) => {
-            logger.log(message);
-        });
-    }
+    // Write all on initialization
+    module.writeAll();
 
-}
+    // Export controller
+    return module;
+});

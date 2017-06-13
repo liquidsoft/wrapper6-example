@@ -1,31 +1,23 @@
-/*
-Dependencies
- */
-
-import {Module} from "wrapper6";
+const app = require("wrapper6");
 
 /*
-Module
+ -------------------------------
+ Unnamed module registered using `define`
+ -------------------------------
  */
 
-export default class IndexModule extends Module {
+app.define(() => {
 
-    boot() {
-        // The index module will only boot if the body contains the index class
-        if (!document.body.classList.contains("index")) {
-            return false;
-        }
-
-        // Add the description to document.body
-        this.description = document.createElement("div");
-        this.description.id = "description";
-
-        document.body.appendChild(this.description);
+    // The index module will only boot if the body contains the index class
+    if (!document.body.classList.contains("index")) {
+        return false;
     }
 
-    ready() {
-        // Set inner text once the module has booted
-        this.description.innerText = "Index module has loaded and it is ready.";
-    }
+    // Initialize element
+    let description = document.createElement("div");
+    description.id = "description";
+    description.innerText = "Index module has loaded and it is ready.";
 
-}
+    document.body.appendChild(description);
+
+});

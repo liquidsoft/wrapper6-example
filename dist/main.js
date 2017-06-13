@@ -1,37 +1,38 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 'use strict';
 
-var copy       = require('es5-ext/object/copy')
-  , map        = require('es5-ext/object/map')
-  , callable   = require('es5-ext/object/valid-callable')
-  , validValue = require('es5-ext/object/valid-value')
+var copy             = require('es5-ext/object/copy')
+  , normalizeOptions = require('es5-ext/object/normalize-options')
+  , ensureCallable   = require('es5-ext/object/valid-callable')
+  , map              = require('es5-ext/object/map')
+  , callable         = require('es5-ext/object/valid-callable')
+  , validValue       = require('es5-ext/object/valid-value')
 
   , bind = Function.prototype.bind, defineProperty = Object.defineProperty
   , hasOwnProperty = Object.prototype.hasOwnProperty
   , define;
 
-define = function (name, desc, bindTo) {
+define = function (name, desc, options) {
 	var value = validValue(desc) && callable(desc.value), dgs;
 	dgs = copy(desc);
 	delete dgs.writable;
 	delete dgs.value;
 	dgs.get = function () {
-		if (hasOwnProperty.call(this, name)) return value;
-		desc.value = bind.call(value, (bindTo == null) ? this : this[bindTo]);
+		if (!options.overwriteDefinition && hasOwnProperty.call(this, name)) return value;
+		desc.value = bind.call(value, options.resolveContext ? options.resolveContext(this) : this);
 		defineProperty(this, name, desc);
 		return this[name];
 	};
 	return dgs;
 };
 
-module.exports = function (props/*, bindTo*/) {
-	var bindTo = arguments[1];
-	return map(props, function (desc, name) {
-		return define(name, desc, bindTo);
-	});
+module.exports = function (props/*, options*/) {
+	var options = normalizeOptions(arguments[1]);
+	if (options.resolveContext != null) ensureCallable(options.resolveContext);
+	return map(props, function (desc, name) { return define(name, desc, options); });
 };
 
-},{"es5-ext/object/copy":15,"es5-ext/object/map":23,"es5-ext/object/valid-callable":29,"es5-ext/object/valid-value":30}],2:[function(require,module,exports){
+},{"es5-ext/object/copy":20,"es5-ext/object/map":28,"es5-ext/object/normalize-options":29,"es5-ext/object/valid-callable":34,"es5-ext/object/valid-value":35}],2:[function(require,module,exports){
 'use strict';
 
 var assign        = require('es5-ext/object/assign')
@@ -96,7 +97,7 @@ d.gs = function (dscr, get, set/*, options*/) {
 	return !options ? desc : assign(normalizeOpts(options), desc);
 };
 
-},{"es5-ext/object/assign":12,"es5-ext/object/is-callable":18,"es5-ext/object/normalize-options":24,"es5-ext/string/#/contains":31}],3:[function(require,module,exports){
+},{"es5-ext/object/assign":17,"es5-ext/object/is-callable":23,"es5-ext/object/normalize-options":29,"es5-ext/string/#/contains":36}],3:[function(require,module,exports){
 // Inspired by Google Closure:
 // http://closure-library.googlecode.com/svn/docs/
 // closure_goog_array_array.js.html#goog.array.clear
@@ -110,7 +111,7 @@ module.exports = function () {
 	return this;
 };
 
-},{"../../object/valid-value":30}],4:[function(require,module,exports){
+},{"../../object/valid-value":35}],4:[function(require,module,exports){
 'use strict';
 
 var toPosInt = require('../../number/to-pos-integer')
@@ -141,7 +142,133 @@ module.exports = function (searchElement/*, fromIndex*/) {
 	return -1;
 };
 
-},{"../../number/to-pos-integer":10,"../../object/valid-value":30}],5:[function(require,module,exports){
+},{"../../number/to-pos-integer":15,"../../object/valid-value":35}],5:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./is-implemented')()
+	? Array.from
+	: require('./shim');
+
+},{"./is-implemented":6,"./shim":7}],6:[function(require,module,exports){
+'use strict';
+
+module.exports = function () {
+	var from = Array.from, arr, result;
+	if (typeof from !== 'function') return false;
+	arr = ['raz', 'dwa'];
+	result = from(arr);
+	return Boolean(result && (result !== arr) && (result[1] === 'dwa'));
+};
+
+},{}],7:[function(require,module,exports){
+'use strict';
+
+var iteratorSymbol = require('es6-symbol').iterator
+  , isArguments    = require('../../function/is-arguments')
+  , isFunction     = require('../../function/is-function')
+  , toPosInt       = require('../../number/to-pos-integer')
+  , callable       = require('../../object/valid-callable')
+  , validValue     = require('../../object/valid-value')
+  , isString       = require('../../string/is-string')
+
+  , isArray = Array.isArray, call = Function.prototype.call
+  , desc = { configurable: true, enumerable: true, writable: true, value: null }
+  , defineProperty = Object.defineProperty;
+
+module.exports = function (arrayLike/*, mapFn, thisArg*/) {
+	var mapFn = arguments[1], thisArg = arguments[2], Constructor, i, j, arr, l, code, iterator
+	  , result, getIterator, value;
+
+	arrayLike = Object(validValue(arrayLike));
+
+	if (mapFn != null) callable(mapFn);
+	if (!this || (this === Array) || !isFunction(this)) {
+		// Result: Plain array
+		if (!mapFn) {
+			if (isArguments(arrayLike)) {
+				// Source: Arguments
+				l = arrayLike.length;
+				if (l !== 1) return Array.apply(null, arrayLike);
+				arr = new Array(1);
+				arr[0] = arrayLike[0];
+				return arr;
+			}
+			if (isArray(arrayLike)) {
+				// Source: Array
+				arr = new Array(l = arrayLike.length);
+				for (i = 0; i < l; ++i) arr[i] = arrayLike[i];
+				return arr;
+			}
+		}
+		arr = [];
+	} else {
+		// Result: Non plain array
+		Constructor = this;
+	}
+
+	if (!isArray(arrayLike)) {
+		if ((getIterator = arrayLike[iteratorSymbol]) !== undefined) {
+			// Source: Iterator
+			iterator = callable(getIterator).call(arrayLike);
+			if (Constructor) arr = new Constructor();
+			result = iterator.next();
+			i = 0;
+			while (!result.done) {
+				value = mapFn ? call.call(mapFn, thisArg, result.value, i) : result.value;
+				if (!Constructor) {
+					arr[i] = value;
+				} else {
+					desc.value = value;
+					defineProperty(arr, i, desc);
+				}
+				result = iterator.next();
+				++i;
+			}
+			l = i;
+		} else if (isString(arrayLike)) {
+			// Source: String
+			l = arrayLike.length;
+			if (Constructor) arr = new Constructor();
+			for (i = 0, j = 0; i < l; ++i) {
+				value = arrayLike[i];
+				if ((i + 1) < l) {
+					code = value.charCodeAt(0);
+					if ((code >= 0xD800) && (code <= 0xDBFF)) value += arrayLike[++i];
+				}
+				value = mapFn ? call.call(mapFn, thisArg, value, j) : value;
+				if (!Constructor) {
+					arr[j] = value;
+				} else {
+					desc.value = value;
+					defineProperty(arr, j, desc);
+				}
+				++j;
+			}
+			l = j;
+		}
+	}
+	if (l === undefined) {
+		// Source: array or array-like
+		l = toPosInt(arrayLike.length);
+		if (Constructor) arr = new Constructor(l);
+		for (i = 0; i < l; ++i) {
+			value = mapFn ? call.call(mapFn, thisArg, arrayLike[i], i) : arrayLike[i];
+			if (!Constructor) {
+				arr[i] = value;
+			} else {
+				desc.value = value;
+				defineProperty(arr, i, desc);
+			}
+		}
+	}
+	if (Constructor) {
+		desc.value = null;
+		arr.length = l;
+	}
+	return arr;
+};
+
+},{"../../function/is-arguments":8,"../../function/is-function":9,"../../number/to-pos-integer":15,"../../object/valid-callable":34,"../../object/valid-value":35,"../../string/is-string":39,"es6-symbol":54}],8:[function(require,module,exports){
 'use strict';
 
 var toString = Object.prototype.toString
@@ -150,14 +277,30 @@ var toString = Object.prototype.toString
 
 module.exports = function (x) { return (toString.call(x) === id); };
 
-},{}],6:[function(require,module,exports){
+},{}],9:[function(require,module,exports){
+'use strict';
+
+var toString = Object.prototype.toString
+
+  , id = toString.call(require('./noop'));
+
+module.exports = function (f) {
+	return (typeof f === "function") && (toString.call(f) === id);
+};
+
+},{"./noop":10}],10:[function(require,module,exports){
+'use strict';
+
+module.exports = function () {};
+
+},{}],11:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? Math.sign
 	: require('./shim');
 
-},{"./is-implemented":7,"./shim":8}],7:[function(require,module,exports){
+},{"./is-implemented":12,"./shim":13}],12:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -166,7 +309,7 @@ module.exports = function () {
 	return ((sign(10) === 1) && (sign(-20) === -1));
 };
 
-},{}],8:[function(require,module,exports){
+},{}],13:[function(require,module,exports){
 'use strict';
 
 module.exports = function (value) {
@@ -175,7 +318,7 @@ module.exports = function (value) {
 	return (value > 0) ? 1 : -1;
 };
 
-},{}],9:[function(require,module,exports){
+},{}],14:[function(require,module,exports){
 'use strict';
 
 var sign = require('../math/sign')
@@ -189,7 +332,7 @@ module.exports = function (value) {
 	return sign(value) * floor(abs(value));
 };
 
-},{"../math/sign":6}],10:[function(require,module,exports){
+},{"../math/sign":11}],15:[function(require,module,exports){
 'use strict';
 
 var toInteger = require('./to-integer')
@@ -198,7 +341,7 @@ var toInteger = require('./to-integer')
 
 module.exports = function (value) { return max(0, toInteger(value)); };
 
-},{"./to-integer":9}],11:[function(require,module,exports){
+},{"./to-integer":14}],16:[function(require,module,exports){
 // Internal method, used by iteration functions.
 // Calls a function for each key-value pair found in object
 // Optionally takes compareFn to iterate object in specific order
@@ -229,14 +372,14 @@ module.exports = function (method, defVal) {
 	};
 };
 
-},{"./valid-callable":29,"./valid-value":30}],12:[function(require,module,exports){
+},{"./valid-callable":34,"./valid-value":35}],17:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? Object.assign
 	: require('./shim');
 
-},{"./is-implemented":13,"./shim":14}],13:[function(require,module,exports){
+},{"./is-implemented":18,"./shim":19}],18:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -247,7 +390,7 @@ module.exports = function () {
 	return (obj.foo + obj.bar + obj.trzy) === 'razdwatrzy';
 };
 
-},{}],14:[function(require,module,exports){
+},{}],19:[function(require,module,exports){
 'use strict';
 
 var keys  = require('../keys')
@@ -271,19 +414,28 @@ module.exports = function (dest, src/*, …srcn*/) {
 	return dest;
 };
 
-},{"../keys":20,"../valid-value":30}],15:[function(require,module,exports){
+},{"../keys":25,"../valid-value":35}],20:[function(require,module,exports){
 'use strict';
 
-var assign = require('./assign')
+var aFrom  = require('../array/from')
+  , assign = require('./assign')
   , value  = require('./valid-value');
 
-module.exports = function (obj) {
-	var copy = Object(value(obj));
-	if (copy !== obj) return copy;
-	return assign({}, obj);
+module.exports = function (obj/*, propertyNames, options*/) {
+	var copy = Object(value(obj)), propertyNames = arguments[1], options = Object(arguments[2]);
+	if (copy !== obj && !propertyNames) return copy;
+	var result = {};
+	if (propertyNames) {
+		aFrom(propertyNames, function (propertyName) {
+			if (options.ensure || propertyName in obj) result[propertyName] = obj[propertyName];
+		});
+	} else {
+		assign(result, obj);
+	}
+	return result;
 };
 
-},{"./assign":12,"./valid-value":30}],16:[function(require,module,exports){
+},{"../array/from":5,"./assign":17,"./valid-value":35}],21:[function(require,module,exports){
 // Workaround for http://code.google.com/p/v8/issues/detail?id=2804
 
 'use strict';
@@ -321,35 +473,35 @@ module.exports = (function () {
 	};
 }());
 
-},{"./set-prototype-of/is-implemented":27,"./set-prototype-of/shim":28}],17:[function(require,module,exports){
+},{"./set-prototype-of/is-implemented":32,"./set-prototype-of/shim":33}],22:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./_iterate')('forEach');
 
-},{"./_iterate":11}],18:[function(require,module,exports){
+},{"./_iterate":16}],23:[function(require,module,exports){
 // Deprecated
 
 'use strict';
 
 module.exports = function (obj) { return typeof obj === 'function'; };
 
-},{}],19:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
 'use strict';
 
-var map = { function: true, object: true };
+var map = { 'function': true, object: true };
 
 module.exports = function (x) {
 	return ((x != null) && map[typeof x]) || false;
 };
 
-},{}],20:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? Object.keys
 	: require('./shim');
 
-},{"./is-implemented":21,"./shim":22}],21:[function(require,module,exports){
+},{"./is-implemented":26,"./shim":27}],26:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -359,7 +511,7 @@ module.exports = function () {
 	} catch (e) { return false; }
 };
 
-},{}],22:[function(require,module,exports){
+},{}],27:[function(require,module,exports){
 'use strict';
 
 var keys = Object.keys;
@@ -368,7 +520,7 @@ module.exports = function (object) {
 	return keys(object == null ? object : Object(object));
 };
 
-},{}],23:[function(require,module,exports){
+},{}],28:[function(require,module,exports){
 'use strict';
 
 var callable = require('./valid-callable')
@@ -385,7 +537,7 @@ module.exports = function (obj, cb/*, thisArg*/) {
 	return o;
 };
 
-},{"./for-each":17,"./valid-callable":29}],24:[function(require,module,exports){
+},{"./for-each":22,"./valid-callable":34}],29:[function(require,module,exports){
 'use strict';
 
 var forEach = Array.prototype.forEach, create = Object.create;
@@ -404,7 +556,7 @@ module.exports = function (options/*, …options*/) {
 	return result;
 };
 
-},{}],25:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
 'use strict';
 
 var forEach = Array.prototype.forEach, create = Object.create;
@@ -415,14 +567,14 @@ module.exports = function (arg/*, …args*/) {
 	return set;
 };
 
-},{}],26:[function(require,module,exports){
+},{}],31:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? Object.setPrototypeOf
 	: require('./shim');
 
-},{"./is-implemented":27,"./shim":28}],27:[function(require,module,exports){
+},{"./is-implemented":32,"./shim":33}],32:[function(require,module,exports){
 'use strict';
 
 var create = Object.create, getPrototypeOf = Object.getPrototypeOf
@@ -435,7 +587,7 @@ module.exports = function (/*customCreate*/) {
 	return getPrototypeOf(setPrototypeOf(customCreate(null), x)) === x;
 };
 
-},{}],28:[function(require,module,exports){
+},{}],33:[function(require,module,exports){
 // Big thanks to @WebReflection for sorting this out
 // https://gist.github.com/WebReflection/5593554
 
@@ -510,7 +662,7 @@ module.exports = (function (status) {
 
 require('../create');
 
-},{"../create":16,"../is-object":19,"../valid-value":30}],29:[function(require,module,exports){
+},{"../create":21,"../is-object":24,"../valid-value":35}],34:[function(require,module,exports){
 'use strict';
 
 module.exports = function (fn) {
@@ -518,7 +670,7 @@ module.exports = function (fn) {
 	return fn;
 };
 
-},{}],30:[function(require,module,exports){
+},{}],35:[function(require,module,exports){
 'use strict';
 
 module.exports = function (value) {
@@ -526,14 +678,14 @@ module.exports = function (value) {
 	return value;
 };
 
-},{}],31:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? String.prototype.contains
 	: require('./shim');
 
-},{"./is-implemented":32,"./shim":33}],32:[function(require,module,exports){
+},{"./is-implemented":37,"./shim":38}],37:[function(require,module,exports){
 'use strict';
 
 var str = 'razdwatrzy';
@@ -543,7 +695,7 @@ module.exports = function () {
 	return ((str.contains('dwa') === true) && (str.contains('foo') === false));
 };
 
-},{}],33:[function(require,module,exports){
+},{}],38:[function(require,module,exports){
 'use strict';
 
 var indexOf = String.prototype.indexOf;
@@ -552,7 +704,7 @@ module.exports = function (searchString/*, position*/) {
 	return indexOf.call(this, searchString, arguments[1]) > -1;
 };
 
-},{}],34:[function(require,module,exports){
+},{}],39:[function(require,module,exports){
 'use strict';
 
 var toString = Object.prototype.toString
@@ -564,7 +716,7 @@ module.exports = function (x) {
 		((x instanceof String) || (toString.call(x) === id))) || false;
 };
 
-},{}],35:[function(require,module,exports){
+},{}],40:[function(require,module,exports){
 'use strict';
 
 var setPrototypeOf = require('es5-ext/object/set-prototype-of')
@@ -596,7 +748,7 @@ ArrayIterator.prototype = Object.create(Iterator.prototype, {
 	toString: d(function () { return '[object Array Iterator]'; })
 });
 
-},{"./":38,"d":2,"es5-ext/object/set-prototype-of":26,"es5-ext/string/#/contains":31}],36:[function(require,module,exports){
+},{"./":43,"d":2,"es5-ext/object/set-prototype-of":31,"es5-ext/string/#/contains":36}],41:[function(require,module,exports){
 'use strict';
 
 var isArguments = require('es5-ext/function/is-arguments')
@@ -644,7 +796,7 @@ module.exports = function (iterable, cb/*, thisArg*/) {
 	}
 };
 
-},{"./get":37,"es5-ext/function/is-arguments":5,"es5-ext/object/valid-callable":29,"es5-ext/string/is-string":34}],37:[function(require,module,exports){
+},{"./get":42,"es5-ext/function/is-arguments":8,"es5-ext/object/valid-callable":34,"es5-ext/string/is-string":39}],42:[function(require,module,exports){
 'use strict';
 
 var isArguments    = require('es5-ext/function/is-arguments')
@@ -661,7 +813,7 @@ module.exports = function (obj) {
 	return new ArrayIterator(obj);
 };
 
-},{"./array":35,"./string":40,"./valid-iterable":41,"es5-ext/function/is-arguments":5,"es5-ext/string/is-string":34,"es6-symbol":49}],38:[function(require,module,exports){
+},{"./array":40,"./string":45,"./valid-iterable":46,"es5-ext/function/is-arguments":8,"es5-ext/string/is-string":39,"es6-symbol":54}],43:[function(require,module,exports){
 'use strict';
 
 var clear    = require('es5-ext/array/#/clear')
@@ -753,7 +905,7 @@ defineProperty(Iterator.prototype, Symbol.iterator, d(function () {
 }));
 defineProperty(Iterator.prototype, Symbol.toStringTag, d('', 'Iterator'));
 
-},{"d":2,"d/auto-bind":1,"es5-ext/array/#/clear":3,"es5-ext/object/assign":12,"es5-ext/object/valid-callable":29,"es5-ext/object/valid-value":30,"es6-symbol":49}],39:[function(require,module,exports){
+},{"d":2,"d/auto-bind":1,"es5-ext/array/#/clear":3,"es5-ext/object/assign":17,"es5-ext/object/valid-callable":34,"es5-ext/object/valid-value":35,"es6-symbol":54}],44:[function(require,module,exports){
 'use strict';
 
 var isArguments    = require('es5-ext/function/is-arguments')
@@ -770,7 +922,7 @@ module.exports = function (value) {
 	return (typeof value[iteratorSymbol] === 'function');
 };
 
-},{"es5-ext/function/is-arguments":5,"es5-ext/string/is-string":34,"es6-symbol":49}],40:[function(require,module,exports){
+},{"es5-ext/function/is-arguments":8,"es5-ext/string/is-string":39,"es6-symbol":54}],45:[function(require,module,exports){
 // Thanks @mathiasbynens
 // http://mathiasbynens.be/notes/javascript-unicode#iterating-over-symbols
 
@@ -809,7 +961,7 @@ StringIterator.prototype = Object.create(Iterator.prototype, {
 	toString: d(function () { return '[object String Iterator]'; })
 });
 
-},{"./":38,"d":2,"es5-ext/object/set-prototype-of":26}],41:[function(require,module,exports){
+},{"./":43,"d":2,"es5-ext/object/set-prototype-of":31}],46:[function(require,module,exports){
 'use strict';
 
 var isIterable = require('./is-iterable');
@@ -819,12 +971,12 @@ module.exports = function (value) {
 	return value;
 };
 
-},{"./is-iterable":39}],42:[function(require,module,exports){
+},{"./is-iterable":44}],47:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')() ? Map : require('./polyfill');
 
-},{"./is-implemented":43,"./polyfill":47}],43:[function(require,module,exports){
+},{"./is-implemented":48,"./polyfill":52}],48:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -858,7 +1010,7 @@ module.exports = function () {
 	return true;
 };
 
-},{}],44:[function(require,module,exports){
+},{}],49:[function(require,module,exports){
 // Exports true if environment provides native `Map` implementation,
 // whatever that is.
 
@@ -869,13 +1021,13 @@ module.exports = (function () {
 	return (Object.prototype.toString.call(new Map()) === '[object Map]');
 }());
 
-},{}],45:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
 'use strict';
 
 module.exports = require('es5-ext/object/primitive-set')('key',
 	'value', 'key+value');
 
-},{"es5-ext/object/primitive-set":25}],46:[function(require,module,exports){
+},{"es5-ext/object/primitive-set":30}],51:[function(require,module,exports){
 'use strict';
 
 var setPrototypeOf    = require('es5-ext/object/set-prototype-of')
@@ -915,7 +1067,7 @@ MapIterator.prototype = Object.create(Iterator.prototype, {
 Object.defineProperty(MapIterator.prototype, toStringTagSymbol,
 	d('c', 'Map Iterator'));
 
-},{"./iterator-kinds":45,"d":2,"es5-ext/object/set-prototype-of":26,"es6-iterator":38,"es6-symbol":49}],47:[function(require,module,exports){
+},{"./iterator-kinds":50,"d":2,"es5-ext/object/set-prototype-of":31,"es6-iterator":43,"es6-symbol":54}],52:[function(require,module,exports){
 'use strict';
 
 var clear          = require('es5-ext/array/#/clear')
@@ -1021,7 +1173,7 @@ Object.defineProperty(MapPoly.prototype, Symbol.iterator, d(function () {
 }));
 Object.defineProperty(MapPoly.prototype, Symbol.toStringTag, d('c', 'Map'));
 
-},{"./is-native-implemented":44,"./lib/iterator":46,"d":2,"es5-ext/array/#/clear":3,"es5-ext/array/#/e-index-of":4,"es5-ext/object/set-prototype-of":26,"es5-ext/object/valid-callable":29,"es5-ext/object/valid-value":30,"es6-iterator/for-of":36,"es6-iterator/valid-iterable":41,"es6-symbol":49,"event-emitter":54}],48:[function(require,module,exports){
+},{"./is-native-implemented":49,"./lib/iterator":51,"d":2,"es5-ext/array/#/clear":3,"es5-ext/array/#/e-index-of":4,"es5-ext/object/set-prototype-of":31,"es5-ext/object/valid-callable":34,"es5-ext/object/valid-value":35,"es6-iterator/for-of":41,"es6-iterator/valid-iterable":46,"es6-symbol":54,"event-emitter":59}],53:[function(require,module,exports){
 (function (process,global){
 /*!
  * @overview es6-promise - a tiny implementation of Promises/A+.
@@ -2182,12 +2334,12 @@ return Promise;
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 
-},{"_process":55}],49:[function(require,module,exports){
+},{"_process":61}],54:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')() ? Symbol : require('./polyfill');
 
-},{"./is-implemented":50,"./polyfill":52}],50:[function(require,module,exports){
+},{"./is-implemented":55,"./polyfill":57}],55:[function(require,module,exports){
 'use strict';
 
 var validTypes = { object: true, symbol: true };
@@ -2206,7 +2358,7 @@ module.exports = function () {
 	return true;
 };
 
-},{}],51:[function(require,module,exports){
+},{}],56:[function(require,module,exports){
 'use strict';
 
 module.exports = function (x) {
@@ -2217,8 +2369,8 @@ module.exports = function (x) {
 	return (x[x.constructor.toStringTag] === 'Symbol');
 };
 
-},{}],52:[function(require,module,exports){
-// ES2015 Symbol polyfill for environments that do not support it (or partially support it)
+},{}],57:[function(require,module,exports){
+// ES2015 Symbol polyfill for environments that do not (or partially) support it
 
 'use strict';
 
@@ -2263,7 +2415,7 @@ var generateName = (function () {
 // Internal constructor (not one exposed) for creating Symbol instances.
 // This one is used to ensure that `someSymbol instanceof Symbol` always return false
 HiddenSymbol = function Symbol(description) {
-	if (this instanceof HiddenSymbol) throw new TypeError('TypeError: Symbol is not a constructor');
+	if (this instanceof HiddenSymbol) throw new TypeError('Symbol is not a constructor');
 	return SymbolPolyfill(description);
 };
 
@@ -2271,7 +2423,7 @@ HiddenSymbol = function Symbol(description) {
 // (returns instances of HiddenSymbol)
 module.exports = SymbolPolyfill = function Symbol(description) {
 	var symbol;
-	if (this instanceof Symbol) throw new TypeError('TypeError: Symbol is not a constructor');
+	if (this instanceof Symbol) throw new TypeError('Symbol is not a constructor');
 	if (isNativeSafe) return NativeSymbol(description);
 	symbol = create(HiddenSymbol.prototype);
 	description = (description === undefined ? '' : String(description));
@@ -2291,8 +2443,8 @@ defineProperties(SymbolPolyfill, {
 		for (key in globalSymbols) if (globalSymbols[key] === s) return key;
 	}),
 
-	// If there's native implementation of given symbol, let's fallback to it
-	// to ensure proper interoperability with other native functions e.g. Array.from
+	// To ensure proper interoperability with other native functions (e.g. Array.from)
+	// fallback to eventual native implementation of given symbol
 	hasInstance: d('', (NativeSymbol && NativeSymbol.hasInstance) || SymbolPolyfill('hasInstance')),
 	isConcatSpreadable: d('', (NativeSymbol && NativeSymbol.isConcatSpreadable) ||
 		SymbolPolyfill('isConcatSpreadable')),
@@ -2337,7 +2489,7 @@ defineProperty(HiddenSymbol.prototype, SymbolPolyfill.toStringTag,
 defineProperty(HiddenSymbol.prototype, SymbolPolyfill.toPrimitive,
 	d('c', SymbolPolyfill.prototype[SymbolPolyfill.toPrimitive]));
 
-},{"./validate-symbol":53,"d":2}],53:[function(require,module,exports){
+},{"./validate-symbol":58,"d":2}],58:[function(require,module,exports){
 'use strict';
 
 var isSymbol = require('./is-symbol');
@@ -2347,7 +2499,7 @@ module.exports = function (value) {
 	return value;
 };
 
-},{"./is-symbol":51}],54:[function(require,module,exports){
+},{"./is-symbol":56}],59:[function(require,module,exports){
 'use strict';
 
 var d        = require('d')
@@ -2481,7 +2633,311 @@ module.exports = exports = function (o) {
 };
 exports.methods = methods;
 
-},{"d":2,"es5-ext/object/valid-callable":29}],55:[function(require,module,exports){
+},{"d":2,"es5-ext/object/valid-callable":34}],60:[function(require,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+function EventEmitter() {
+  this._events = this._events || {};
+  this._maxListeners = this._maxListeners || undefined;
+}
+module.exports = EventEmitter;
+
+// Backwards-compat with node 0.10.x
+EventEmitter.EventEmitter = EventEmitter;
+
+EventEmitter.prototype._events = undefined;
+EventEmitter.prototype._maxListeners = undefined;
+
+// By default EventEmitters will print a warning if more than 10 listeners are
+// added to it. This is a useful default which helps finding memory leaks.
+EventEmitter.defaultMaxListeners = 10;
+
+// Obviously not all Emitters should be limited to 10. This function allows
+// that to be increased. Set to zero for unlimited.
+EventEmitter.prototype.setMaxListeners = function(n) {
+  if (!isNumber(n) || n < 0 || isNaN(n))
+    throw TypeError('n must be a positive number');
+  this._maxListeners = n;
+  return this;
+};
+
+EventEmitter.prototype.emit = function(type) {
+  var er, handler, len, args, i, listeners;
+
+  if (!this._events)
+    this._events = {};
+
+  // If there is no 'error' event listener then throw.
+  if (type === 'error') {
+    if (!this._events.error ||
+        (isObject(this._events.error) && !this._events.error.length)) {
+      er = arguments[1];
+      if (er instanceof Error) {
+        throw er; // Unhandled 'error' event
+      } else {
+        // At least give some kind of context to the user
+        var err = new Error('Uncaught, unspecified "error" event. (' + er + ')');
+        err.context = er;
+        throw err;
+      }
+    }
+  }
+
+  handler = this._events[type];
+
+  if (isUndefined(handler))
+    return false;
+
+  if (isFunction(handler)) {
+    switch (arguments.length) {
+      // fast cases
+      case 1:
+        handler.call(this);
+        break;
+      case 2:
+        handler.call(this, arguments[1]);
+        break;
+      case 3:
+        handler.call(this, arguments[1], arguments[2]);
+        break;
+      // slower
+      default:
+        args = Array.prototype.slice.call(arguments, 1);
+        handler.apply(this, args);
+    }
+  } else if (isObject(handler)) {
+    args = Array.prototype.slice.call(arguments, 1);
+    listeners = handler.slice();
+    len = listeners.length;
+    for (i = 0; i < len; i++)
+      listeners[i].apply(this, args);
+  }
+
+  return true;
+};
+
+EventEmitter.prototype.addListener = function(type, listener) {
+  var m;
+
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  if (!this._events)
+    this._events = {};
+
+  // To avoid recursion in the case that type === "newListener"! Before
+  // adding it to the listeners, first emit "newListener".
+  if (this._events.newListener)
+    this.emit('newListener', type,
+              isFunction(listener.listener) ?
+              listener.listener : listener);
+
+  if (!this._events[type])
+    // Optimize the case of one listener. Don't need the extra array object.
+    this._events[type] = listener;
+  else if (isObject(this._events[type]))
+    // If we've already got an array, just append.
+    this._events[type].push(listener);
+  else
+    // Adding the second element, need to change to array.
+    this._events[type] = [this._events[type], listener];
+
+  // Check for listener leak
+  if (isObject(this._events[type]) && !this._events[type].warned) {
+    if (!isUndefined(this._maxListeners)) {
+      m = this._maxListeners;
+    } else {
+      m = EventEmitter.defaultMaxListeners;
+    }
+
+    if (m && m > 0 && this._events[type].length > m) {
+      this._events[type].warned = true;
+      console.error('(node) warning: possible EventEmitter memory ' +
+                    'leak detected. %d listeners added. ' +
+                    'Use emitter.setMaxListeners() to increase limit.',
+                    this._events[type].length);
+      if (typeof console.trace === 'function') {
+        // not supported in IE 10
+        console.trace();
+      }
+    }
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.on = EventEmitter.prototype.addListener;
+
+EventEmitter.prototype.once = function(type, listener) {
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  var fired = false;
+
+  function g() {
+    this.removeListener(type, g);
+
+    if (!fired) {
+      fired = true;
+      listener.apply(this, arguments);
+    }
+  }
+
+  g.listener = listener;
+  this.on(type, g);
+
+  return this;
+};
+
+// emits a 'removeListener' event iff the listener was removed
+EventEmitter.prototype.removeListener = function(type, listener) {
+  var list, position, length, i;
+
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  if (!this._events || !this._events[type])
+    return this;
+
+  list = this._events[type];
+  length = list.length;
+  position = -1;
+
+  if (list === listener ||
+      (isFunction(list.listener) && list.listener === listener)) {
+    delete this._events[type];
+    if (this._events.removeListener)
+      this.emit('removeListener', type, listener);
+
+  } else if (isObject(list)) {
+    for (i = length; i-- > 0;) {
+      if (list[i] === listener ||
+          (list[i].listener && list[i].listener === listener)) {
+        position = i;
+        break;
+      }
+    }
+
+    if (position < 0)
+      return this;
+
+    if (list.length === 1) {
+      list.length = 0;
+      delete this._events[type];
+    } else {
+      list.splice(position, 1);
+    }
+
+    if (this._events.removeListener)
+      this.emit('removeListener', type, listener);
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.removeAllListeners = function(type) {
+  var key, listeners;
+
+  if (!this._events)
+    return this;
+
+  // not listening for removeListener, no need to emit
+  if (!this._events.removeListener) {
+    if (arguments.length === 0)
+      this._events = {};
+    else if (this._events[type])
+      delete this._events[type];
+    return this;
+  }
+
+  // emit removeListener for all listeners on all events
+  if (arguments.length === 0) {
+    for (key in this._events) {
+      if (key === 'removeListener') continue;
+      this.removeAllListeners(key);
+    }
+    this.removeAllListeners('removeListener');
+    this._events = {};
+    return this;
+  }
+
+  listeners = this._events[type];
+
+  if (isFunction(listeners)) {
+    this.removeListener(type, listeners);
+  } else if (listeners) {
+    // LIFO order
+    while (listeners.length)
+      this.removeListener(type, listeners[listeners.length - 1]);
+  }
+  delete this._events[type];
+
+  return this;
+};
+
+EventEmitter.prototype.listeners = function(type) {
+  var ret;
+  if (!this._events || !this._events[type])
+    ret = [];
+  else if (isFunction(this._events[type]))
+    ret = [this._events[type]];
+  else
+    ret = this._events[type].slice();
+  return ret;
+};
+
+EventEmitter.prototype.listenerCount = function(type) {
+  if (this._events) {
+    var evlistener = this._events[type];
+
+    if (isFunction(evlistener))
+      return 1;
+    else if (evlistener)
+      return evlistener.length;
+  }
+  return 0;
+};
+
+EventEmitter.listenerCount = function(emitter, type) {
+  return emitter.listenerCount(type);
+};
+
+function isFunction(arg) {
+  return typeof arg === 'function';
+}
+
+function isNumber(arg) {
+  return typeof arg === 'number';
+}
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+
+function isUndefined(arg) {
+  return arg === void 0;
+}
+
+},{}],61:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -2663,668 +3119,358 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],56:[function(require,module,exports){
+},{}],62:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _scope = require("./scope");
+
+var config = (0, _scope.createScope)();
+exports.default = config;
+},{"./scope":68}],63:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
     value: true
 });
-
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }(); /*
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      Dependencies
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      */
-
-var _reactiveMap = require("./reactive-map");
-
-var _reactiveMap2 = _interopRequireDefault(_reactiveMap);
-
-var _es6Symbol = require("es6-symbol");
-
-var _es6Symbol2 = _interopRequireDefault(_es6Symbol);
-
-var _es6Map = require("es6-map");
-
-var _es6Map2 = _interopRequireDefault(_es6Map);
+exports.ready = undefined;
 
 var _es6Promise = require("es6-promise");
 
-var _utils = require("./utils");
+exports.ready = ready;
+
+/**
+ * document.ready
+ *
+ * @param callback
+ * @returns {Promise<U>|*|Promise.<TResult>}
+ */
+
+function ready() {
+    var callback = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+
+    var promise = new _es6Promise.Promise(function (resolve) {
+        if (document.readyState === "complete") {
+            return resolve();
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            resolve();
+        });
+    });
+
+    return typeof callback === "function" ? promise.then(callback) : promise;
+}
+},{"es6-promise":53}],64:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.Module = exports.Scope = exports.ready = exports.use = exports.require = exports.define = exports.scope = exports.queryObject = exports.resolve = exports.promisify = exports.config = undefined;
+
+var _config = require("./config");
+
+var _config2 = _interopRequireDefault(_config);
+
+var _promises = require("./promises");
+
+var _scope = require("./scope");
+
+var _packages = require("./packages");
+
+var _modules = require("./modules");
+
+var _dom = require("./dom");
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+exports.config = _config2.default;
+exports.promisify = _promises.promisify;
+exports.resolve = _promises.resolve;
+exports.queryObject = _scope.queryObject;
+exports.scope = _scope.createScope;
+exports.define = _packages.define;
+exports.require = _packages.requireDependencies;
+exports.use = _modules.useModule;
+exports.ready = _dom.ready;
+exports.Scope = _scope.Scope;
+exports.Module = _modules.Module;
+},{"./config":62,"./dom":63,"./modules":65,"./packages":66,"./promises":67,"./scope":68}],65:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.Module = exports.useModule = undefined;
+
+var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }(); /*
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |--------------------------------------------------------------------------
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Module wrapper
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |--------------------------------------------------------------------------
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      */
+
+var _packages = require("./packages");
+
+var _es6Promise = require("es6-promise");
+
+var _promises = require("./promises");
+
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
-/*
- Symbols
+/**
+ * Module loader
+ *
+ * @param name
+ * @param moduleClass
+ * @returns {Promise.<TResult>}
  */
+function useModule(name, moduleClass) {
+    if (arguments.length === 1) {
+        moduleClass = name;
+        name = null;
+    }
 
-var _options = (0, _es6Symbol2.default)("options"),
-    _bindings = (0, _es6Symbol2.default)("bindings"),
-    _listeners = (0, _es6Symbol2.default)("listeners"),
-    _factories = (0, _es6Symbol2.default)("factories"),
-    _boot = (0, _es6Symbol2.default)("boot");
+    // create module
+    var module = new moduleClass(),
+        bootResponse = void 0;
 
-/*
-Class
- */
+    // Wrapper methods
+    function boot() {
+        var initialResponse = typeof module.boot === "function" ? module.boot() : null;
 
-var Application = function () {
+        if (initialResponse === false) {
+            return false;
+        }
 
-    /**
-     * Constructor
-     *
-     * @param options
-     */
-    function Application() {
-        var _this = this;
+        return initialResponse instanceof _es6Promise.Promise ? initialResponse.then(function (response) {
+            bootResponse = response;
+            return module;
+        }) : module;
+    }
 
-        var options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
-
-        _classCallCheck(this, Application);
-
-        this[_options] = new _reactiveMap2.default(options);
-        this[_bindings] = new _es6Map2.default();
-        this[_listeners] = new _es6Map2.default();
-        this[_factories] = [];
-
-        if (document.readyState !== "complete") {
-            document.addEventListener("DOMContentLoaded", function () {
-                _this[_factories].forEach(function (factoryMeta) {
-                    _this[_boot](factoryMeta);
-                });
-            });
+    function ready() {
+        if (typeof module.ready === "function") {
+            return module.ready(bootResponse);
         }
     }
 
-    /*
-    Accessors
-     */
-
-    /**
-     * Returns the option map
-     *
-     * @returns {ReactiveMap}
-     */
-
-
-    _createClass(Application, [{
-        key: "on",
-
-
-        /*
-        Events
-         */
-
-        /**
-         * Registers an event listener
-         *
-         * @param eventName
-         * @param callback
-         * @returns {*}
-         */
-        value: function on(eventName, callback) {
-            var _this2 = this;
-
-            if (typeof callback !== "function") {
-                throw new Error("Invalid callback passed as application event listener!");
-                return;
-            }
-
-            var events = eventName.split(" ");
-
-            events.forEach(function (eventName) {
-                if (!_this2[_listeners].has(eventName)) {
-                    _this2[_listeners].set(eventName, []);
-                }
-
-                _this2[_listeners].get(eventName).push(callback);
-            });
-
-            return this;
-        }
-
-        /**
-         * Unregisters an event listener
-         *
-         * @param eventName
-         * @param callback
-         * @returns {Application}
-         */
-
-    }, {
-        key: "off",
-        value: function off(eventName) {
-            var _this3 = this;
-
-            var callback = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
-
-            var events = eventName.split(" ");
-
-            events.forEach(function (eventName) {
-                if (typeof callback !== "function") {
-                    _this3[_listeners].delete(eventName);
-                    return;
-                }
-
-                if (_this3[_listeners].has(eventName)) {
-                    var index = _this3[_listeners].get(eventName).indexOf(callback);
-
-                    if (index > -1) {
-                        _this3[_listeners].get(eventName).splice(index, 1);
-                    }
-                }
-            });
-
-            return this;
-        }
-
-        /**
-         * Triggers an event listener
-         *
-         * @param eventName
-         * @param args
-         * @returns {Application}
-         */
-
-    }, {
-        key: "trigger",
-        value: function trigger(eventName) {
-            var _this4 = this;
-
-            var args = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
-
-            var events = eventName.split(" ");
-
-            events.forEach(function (eventName) {
-                if (_this4[_listeners].has(eventName)) {
-                    _this4[_listeners].get(eventName).forEach(function (callback) {
-                        callback.apply(_this4, args instanceof Array ? args : []);
-                    });
-                }
-            });
-
-            return this;
-        }
-
-        /*
-        Requests
-         */
-
-        /**
-         * Requires a set of bindings
-         *
-         * @param requirements
-         * @returns {Promise}
-         */
-
-    }, {
-        key: "require",
-        value: function require(requirements) {
-            var _this5 = this;
-
-            return new _es6Promise.Promise(function (resolve) {
-                if (!requirements instanceof Array) {
-                    requirements = [requirements];
-                }
-
-                if (requirements.length === 0) {
-                    return resolve({});
-                }
-
-                var // Store solutions
-                solutions = {},
-
-
-                // Create event name
-                eventName = requirements.map(function (name) {
-                    name = typeof name === "string" ? name : "";
-                    return "load:" + name;
-                }).join(" "),
-
-
-                // Event callback
-                callback = function callback(name, module) {
-                    solutions[name] = module;
-
-                    if (Object.keys(solutions).length === requirements.length) {
-                        _this5.off(eventName, callback);
-                        resolve(solutions);
-                    }
-                };
-
-                // Bind event
-                _this5.on(eventName, callback);
-            });
-        }
-
-        /*
-        Modularization
-         */
-
-        /**
-         * Registers a module
-         *
-         * @param name
-         * @param factory
-         * @returns {*}
-         */
-
-    }, {
-        key: "use",
-        value: function use(name, factory) {
-            // Decide arguments
-            if (typeof name === "function") {
-                factory = name;
-                name = null;
-            }
-
-            // Validate factory
-            if (typeof factory !== "function") {
-                throw new Error("The module factory can only be a function.");
-            }
-
-            var factoryMeta = {
-                name: name,
-                factory: factory
-            };
-
-            this[_factories].push(factoryMeta);
-
-            // Boot factory if document is already loaded
-            if (document.readyState === "complete") {
-                this[_boot](factoryMeta);
-            }
-        }
-    }, {
-        key: _boot,
-        value: function value(factoryMeta) {
-            var _this6 = this;
-
-            var module = new factoryMeta.factory(this);
-
-            (0, _utils.promisify)(typeof module.boot === "function" ? function () {
-                return module.boot(_this6);
-            } : true).then(function (result) {
-                // Register binding
-                if (typeof factoryMeta.name === "string") {
-                    _this6[_bindings].set(factoryMeta.name, module);
-
-                    // Define property
-                    if (!_this6.hasOwnProperty(factoryMeta.name)) {
-                        Object.defineProperty(_this6, factoryMeta.name, {
-                            get: function get() {
-                                return _this6[_bindings].get(factoryMeta.name);
-                            }
-                        });
-                    }
-                }
-
-                // Call ready
-                if (typeof module.ready === "function") {
-                    module.ready(_this6, result);
-                }
-
-                // Trigger load
-                _this6.trigger("load:" + factoryMeta.name, [factoryMeta.name, module]);
-            }).catch(function (reason) {
-                console.error(reason);
-            });
-        }
-    }, {
-        key: "options",
-        get: function get() {
-            return this[_options];
-        }
-    }]);
-
-    return Application;
-}();
-
-exports.default = Application;
-},{"./reactive-map":59,"./utils":60,"es6-map":42,"es6-promise":48,"es6-symbol":49}],57:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-exports.Application = exports.Module = exports.ReactiveMap = exports.utils = undefined;
-
-var _utils = require("./utils");
-
-var utils = _interopRequireWildcard(_utils);
-
-var _reactiveMap = require("./reactive-map");
-
-var _reactiveMap2 = _interopRequireDefault(_reactiveMap);
-
-var _module = require("./module");
-
-var _module2 = _interopRequireDefault(_module);
-
-var _application = require("./application");
-
-var _application2 = _interopRequireDefault(_application);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
-
-exports.utils = utils;
-exports.ReactiveMap = _reactiveMap2.default;
-exports.Module = _module2.default;
-exports.Application = _application2.default;
-},{"./application":56,"./module":58,"./reactive-map":59,"./utils":60}],58:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }(); /*
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     Dependencies
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      */
-
-var _es6Symbol = require("es6-symbol");
-
-var _es6Symbol2 = _interopRequireDefault(_es6Symbol);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-/*
-Symbols
- */
-
-var _app = (0, _es6Symbol2.default)("app");
-
-/*
-Class
+    return typeof name === "string" ? (0, _packages.define)(name, boot).then(ready) : (0, _packages.define)(boot).then(ready);
+}
+
+/**
+ * Module base class
  */
 
 var Module = function () {
-    function Module(app) {
+    function Module() {
         _classCallCheck(this, Module);
-
-        this[_app] = app;
     }
 
     _createClass(Module, [{
         key: "boot",
-        value: function boot(app) {}
+        value: function boot() {}
     }, {
         key: "ready",
-        value: function ready(app) {}
-
-        /*
-        Getters
-         */
-
-    }, {
-        key: "app",
-        get: function get() {
-            return this[_app];
-        }
+        value: function ready() {}
     }]);
 
     return Module;
 }();
 
-exports.default = Module;
-},{"es6-symbol":49}],59:[function(require,module,exports){
+/*
+ -------------------------------
+ Exports
+ -------------------------------
+ */
+
+exports.useModule = useModule;
+exports.Module = Module;
+},{"./packages":66,"./promises":67,"es6-promise":53}],66:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
     value: true
 });
+exports.requireDependencies = exports.define = undefined;
 
-var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
+var _config = require("./config");
 
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }(); /*
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     Dependencies
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      */
+var _config2 = _interopRequireDefault(_config);
 
-var _es6Symbol = require("es6-symbol");
-
-var _es6Symbol2 = _interopRequireDefault(_es6Symbol);
-
-var _es6Map = require("es6-map");
-
-var _es6Map2 = _interopRequireDefault(_es6Map);
-
-var _utils = require("./utils");
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-/*
- Symbols
- */
-
-var _data = (0, _es6Symbol2.default)("data"),
-    _computed = (0, _es6Symbol2.default)("computed"),
-    _watchers = (0, _es6Symbol2.default)("watchers");
-
-/*
-Class
- */
-
-var ReactiveMap = function () {
-    function ReactiveMap() {
-        var data = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
-
-        _classCallCheck(this, ReactiveMap);
-
-        this[_data] = {};
-        this[_computed] = new _es6Map2.default();
-        this[_watchers] = new _es6Map2.default();
-
-        // Assign data
-        this.set(data);
-    }
-
-    _createClass(ReactiveMap, [{
-        key: "computed",
-        value: function computed(key, getter) {
-            var _this = this;
-
-            if (key && (typeof key === "undefined" ? "undefined" : _typeof(key)) === "object") {
-                Object.keys(key).forEach(function (propKey) {
-                    _this.computed(propKey, key[propKey]);
-                });
-
-                return this;
-            }
-
-            if (typeof getter === "function") {
-                this[_computed].set(key, getter);
-            }
-
-            return this;
-        }
-    }, {
-        key: "watch",
-        value: function watch(key, callback) {
-            var watchers = this[_watchers].get(key);
-
-            if (!watchers instanceof Array) {
-                watchers = [];
-                this[_watchers].set(key, watchers);
-            }
-
-            watchers.push(callback);
-
-            return this;
-        }
-    }, {
-        key: "get",
-        value: function get(query) {
-            var defaultValue = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
-
-            if (arguments.length === 0) {
-                return this[_data];
-            }
-
-            // Check if computed
-            var head = query.split("."),
-                tail = [],
-                headQuery = void 0,
-                getter = void 0,
-                result = void 0;
-
-            while (head.length > 0) {
-                headQuery = head.join(".");
-                getter = this[_computed].get(headQuery);
-                if (typeof getter === "function") {
-                    result = getter.call(this);
-
-                    return tail.length === 0 ? result : (0, _utils.queryObject)(result, tail.join("."), defaultValue);
-                }
-
-                tail.push(head.pop());
-            }
-
-            return (0, _utils.queryObject)(this[_data], query, defaultValue);
-        }
-    }, {
-        key: "set",
-        value: function set(query, value) {
-            var _this2 = this;
-
-            // Check if query is an object
-            if ((typeof query === "undefined" ? "undefined" : _typeof(query)) === "object") {
-                Object.keys(query).forEach(function (key) {
-                    _this2.set(key, query[key]);
-                });
-
-                return this;
-            }
-
-            var parts = query.split("."),
-                key = parts.pop(),
-                parentQuery = parts.join("."),
-                parent = parts.length === 0 ? this.get() : this.get(parentQuery),
-                watchers,
-                oldValue = this.get(query);
-
-            if (!parent) {
-                parent = {};
-                this.set(parentQuery, parent);
-            }
-
-            parent[key] = value;
-
-            // Trigger "*" watchers
-            watchers = this[_watchers].get("*");
-
-            if (watchers instanceof Array) {
-                watchers.forEach(function (watcher) {
-                    watcher(query, value, oldValue);
-                });
-            }
-
-            // Trigger "*" watchers of parent
-            watchers = this[_watchers].get(parentQuery + ".*");
-
-            if (watchers instanceof Array) {
-                watchers.forEach(function (watcher) {
-                    watcher(query, value, oldValue);
-                });
-            }
-
-            // Trigger specific watcher
-            watchers = this[_watchers].get(query);
-
-            if (watchers instanceof Array) {
-                watchers.forEach(function (watcher) {
-                    watcher(query, value, oldValue);
-                });
-            }
-
-            return this;
-        }
-    }, {
-        key: "has",
-        value: function has(query) {
-            return this.get(query) !== null;
-        }
-    }, {
-        key: "resolve",
-        value: function resolve(query, resolver) {
-            if (!this.has(query)) {
-                this.set(query, resolver());
-            }
-
-            return this.get(query);
-        }
-    }, {
-        key: "empty",
-        value: function empty() {
-            this[_data] = {};
-            return this;
-        }
-    }, {
-        key: "isEmpty",
-        value: function isEmpty() {
-            return Object.keys(this[_data]).length === 0;
-        }
-    }]);
-
-    return ReactiveMap;
-}();
-
-exports.default = ReactiveMap;
-},{"./utils":60,"es6-map":42,"es6-symbol":49}],60:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-
-var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; /*
-                                                                                                                                                                                                                                                                              Dependencies
-                                                                                                                                                                                                                                                                               */
-
-exports.queryObject = queryObject;
-exports.promisify = promisify;
-exports.resolve = resolve;
-exports.now = now;
+var _events = require("events");
 
 var _es6Promise = require("es6-promise");
 
-/**
- * Query an object for a value
- *
- * @param {Object} object
- * @param {String} query
- * @param defaults
- * @returns {*}
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// @private
+var events = new _events.EventEmitter(),
+    packages = new Map();
+
+// @public
+/*
+ |--------------------------------------------------------------------------
+ | Package manager
+ |--------------------------------------------------------------------------
+ |
+ |
+ |
  */
 
-function queryObject(object, query) {
-    var defaults = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : null;
+// @dependencies
+exports.define = define;
+exports.requireDependencies = requireDependencies;
 
-    var current = object,
-        queryParts = query.split("."),
-        part;
+/**
+ * Resolve an array of dependencies
+ *
+ * @param dependencies
+ * @returns {Promise}
+ */
 
-    if (object === null || object === undefined) {
-        return defaults;
-    }
+function requireDependencies(dependencies) {
+    var callback = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
 
-    while (current && queryParts.length > 0) {
-        part = queryParts.shift();
+    var promise = new _es6Promise.Promise(function (succeed, fail) {
+        var requirements = {};
 
-        if (current[part] === undefined) {
-            return defaults;
+        // no requirements
+        if (!(dependencies instanceof Array)) {
+            return succeed(requirements);
         }
 
-        current = current[part];
+        // check if succeeded
+        function checkStatus() {
+            if (Object.keys(requirements).length === dependencies.length) {
+                succeed(requirements);
+            }
+        }
+
+        dependencies.forEach(function (dependency) {
+            if (packages.has(dependency)) {
+                requirements[dependency] = packages.get(dependency);
+            } else {
+                events.once("load:" + dependency, function (requirement) {
+                    requirements[dependency] = requirement;
+                    checkStatus();
+                });
+            }
+        });
+
+        // First check
+        checkStatus();
+    });
+
+    return typeof callback === "function" ? promise.then(callback) : promise;
+};
+
+/**
+ * Define a package
+ *
+ * @param name
+ * @param dependencies
+ * @param callback
+ * @returns {Promise.<TResult>}
+ */
+function define(name, dependencies, callback) {
+    // Adjust arguments
+    if (typeof name === "function") {
+        callback = name;
+        name = null;
+        dependencies = null;
+    } else if (typeof dependencies === "function") {
+        callback = dependencies;
+        dependencies = null;
+
+        if (name instanceof Array) {
+            dependencies = name;
+            name = null;
+        }
     }
 
-    return current;
-}
+    // Check name conflicts
+    if (typeof name === "string") {
+        if (packages.has(name)) {
+            throw new Error("Package '" + name + "' is already loaded!");
+        }
+    }
+
+    // Resolve timeout
+    var timeout = _config2.default.get('package_timeout', 5000),
+        timer = null;
+
+    return new _es6Promise.Promise(function (succeed, fail) {
+
+        // Start timeout
+        if (typeof timeout === "number") {
+            timer = setTimeout(function () {
+                timer = null;
+
+                if (_config2.default.get("debug", true)) {
+                    throw new Error("Package '" + name + "' timed out!");
+                }
+            }, timeout);
+        }
+
+        // Resolve dependencies
+        requireDependencies(dependencies).then(function (requirements) {
+            try {
+
+                // register package
+                var register = function register(pack) {
+                    // cancel timeout
+                    if (timer) {
+                        clearTimeout(timer);
+                        timer = null;
+                    }
+
+                    if (pack === false) {
+                        return;
+                    }
+
+                    if (typeof name === "string") {
+                        packages.set(name, pack);
+                        events.emit("load:" + name, packages.get(name));
+                    }
+
+                    return succeed(pack);
+                };
+
+                // Check boot response
+
+
+                var bootResponse = typeof callback === "function" ? callback(requirements) : callback;return bootResponse instanceof _es6Promise.Promise ? bootResponse.then(register) : register(bootResponse);
+            } catch (ex) {
+                if (_config2.default.get("debug", true)) {
+                    console.error(ex);
+                }
+
+                return fail(ex);
+            }
+        });
+    });
+};
+},{"./config":62,"es6-promise":53,"events":60}],67:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.resolve = exports.promisify = undefined;
+
+var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
+
+var _es6Promise = require("es6-promise");
+
+exports.promisify = promisify;
+exports.resolve = resolve;
 
 /**
  * Transform everything into a promise
@@ -3389,147 +3535,351 @@ function resolve(promiseLike) {
         return response;
     });
 }
-
-/**
- Returns the current unix timestamp in seconds
- */
-
-function now() {
-    return Math.floor((typeof Date.now === "function" ? Date.now() : new Date().getTime()) / 1000);
-}
-},{"es6-promise":48}],61:[function(require,module,exports){
+},{"es6-promise":53}],68:[function(require,module,exports){
 "use strict";
 
-var _wrapper = require("wrapper6");
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.Scope = exports.createScope = exports.queryObject = undefined;
 
-var _index = require("./modules/index");
+var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
 
-var _index2 = _interopRequireDefault(_index);
+var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }(); /*
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      Dependencies
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      */
 
-var _logger = require("./modules/logger");
+var _es6Symbol = require("es6-symbol");
 
-var _logger2 = _interopRequireDefault(_logger);
+var _es6Symbol2 = _interopRequireDefault(_es6Symbol);
 
-var _messages = require("./modules/messages");
+var _es6Map = require("es6-map");
 
-var _messages2 = _interopRequireDefault(_messages);
+var _es6Map2 = _interopRequireDefault(_es6Map);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-/*
-Bootstrap
-*/
-
-/*
-Dependecies
- */
-
-var app = window.app = new _wrapper.Application({
-
-    logger: {
-        delay: 5000
-    },
-
-    messages: {
-        list: ["Hello", "The messages module is now ready"]
-    }
-
-});
-
-/*
-Modules
- */
-
-app.use(_index2.default);
-app.use(_messages2.default);
-app.use("logger", _logger2.default); // A named module can be required as a dependency!
-
-},{"./modules/index":62,"./modules/logger":63,"./modules/messages":64,"wrapper6":57}],62:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
-
-var _wrapper = require("wrapper6");
-
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
-function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
-
-function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; } /*
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               Dependencies
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                */
-
 /*
-Module
+ Scope shorthand constructor
  */
 
-var IndexModule = function (_Module) {
-    _inherits(IndexModule, _Module);
+function createScope() {
+    var data = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
 
-    function IndexModule() {
-        _classCallCheck(this, IndexModule);
+    return new Scope(data);
+}
 
-        return _possibleConstructorReturn(this, (IndexModule.__proto__ || Object.getPrototypeOf(IndexModule)).apply(this, arguments));
+/*
+ queryObject
+ */
+
+function queryObject(object, query) {
+    var defaults = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : null;
+
+    var current = object,
+        queryParts = query.split("."),
+        part;
+
+    if (object === null || object === undefined) {
+        return defaults;
     }
 
-    _createClass(IndexModule, [{
-        key: "boot",
-        value: function boot() {
-            // The index module will only boot if the body contains the index class
-            if (!document.body.classList.contains("index")) {
-                return false;
+    while (current && queryParts.length > 0) {
+        part = queryParts.shift();
+
+        if (current[part] === undefined) {
+            return defaults;
+        }
+
+        current = current[part];
+    }
+
+    return current;
+}
+
+/*
+ Symbols
+ */
+
+var _data = (0, _es6Symbol2.default)("data"),
+    _computed = (0, _es6Symbol2.default)("computed"),
+    _watchers = (0, _es6Symbol2.default)("watchers");
+
+/*
+ Scope class
+ */
+
+var Scope = function () {
+    function Scope() {
+        var data = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+
+        _classCallCheck(this, Scope);
+
+        this[_data] = {};
+        this[_computed] = new _es6Map2.default();
+        this[_watchers] = new _es6Map2.default();
+
+        // Assign data
+        this.set(data);
+    }
+
+    _createClass(Scope, [{
+        key: "computed",
+        value: function computed(key, getter) {
+            var _this = this;
+
+            if (key && (typeof key === "undefined" ? "undefined" : _typeof(key)) === "object") {
+                Object.keys(key).forEach(function (propKey) {
+                    _this.computed(propKey, key[propKey]);
+                });
+
+                return this;
             }
 
-            // Add the description to document.body
-            this.description = document.createElement("div");
-            this.description.id = "description";
+            if (typeof getter === "function") {
+                this[_computed].set(key, getter);
+            }
 
-            document.body.appendChild(this.description);
+            return this;
         }
     }, {
-        key: "ready",
-        value: function ready() {
-            // Set inner text once the module has booted
-            this.description.innerText = "Index module has loaded and it is ready.";
+        key: "watch",
+        value: function watch(key, callback) {
+            var watchers = this[_watchers].get(key);
+
+            if (!(watchers instanceof Array)) {
+                watchers = [];
+                this[_watchers].set(key, watchers);
+            }
+
+            watchers.push(callback);
+
+            return this;
+        }
+    }, {
+        key: "get",
+        value: function get(query) {
+            var defaultValue = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
+
+            if (arguments.length === 0) {
+                return this[_data];
+            }
+
+            // Check if computed
+            var head = query.split("."),
+                tail = [],
+                headQuery = void 0,
+                getter = void 0,
+                result = void 0;
+
+            while (head.length > 0) {
+                headQuery = head.join(".");
+                getter = this[_computed].get(headQuery);
+                if (typeof getter === "function") {
+                    result = getter.call(this);
+
+                    return tail.length === 0 ? result : queryObject(result, tail.join("."), defaultValue);
+                }
+
+                tail.push(head.pop());
+            }
+
+            return queryObject(this[_data], query, defaultValue);
+        }
+    }, {
+        key: "set",
+        value: function set(query, value) {
+            var _this2 = this;
+
+            // Check if query is an object
+            if ((typeof query === "undefined" ? "undefined" : _typeof(query)) === "object") {
+                Object.keys(query).forEach(function (key) {
+                    _this2.set(key, query[key]);
+                });
+
+                return this;
+            }
+
+            var parts = query.split("."),
+                key = parts.pop(),
+                parentQuery = parts.join("."),
+                parent = parts.length === 0 ? this.get() : this.get(parentQuery),
+                watchers,
+                oldValue = this.get(query);
+
+            if (!parent) {
+                parent = {};
+                this.set(parentQuery, parent);
+            }
+
+            parent[key] = value;
+
+            // Trigger "*" watchers
+            watchers = this[_watchers].get("*");
+
+            if (watchers instanceof Array) {
+                watchers.forEach(function (watcher) {
+                    watcher(query, value, oldValue);
+                });
+            }
+
+            // Trigger "*" watchers of parent
+            watchers = this[_watchers].get(parentQuery + ".*");
+
+            if (watchers instanceof Array) {
+                watchers.forEach(function (watcher) {
+                    watcher(query, value, oldValue);
+                });
+            }
+
+            // Trigger specific watcher
+            watchers = this[_watchers].get(query);
+
+            if (watchers instanceof Array) {
+                watchers.forEach(function (watcher) {
+                    watcher(query, value, oldValue);
+                });
+            }
+
+            return this;
+        }
+    }, {
+        key: "remove",
+        value: function remove(query) {
+            var parts = query.split("."),
+                key = parts.pop(),
+                target = parts.length > 0 ? this.get(parts.join(".")) : this.get();
+
+            if (target && (typeof target === "undefined" ? "undefined" : _typeof(target)) === "object") {
+                delete target[key];
+            }
+
+            return this;
+        }
+    }, {
+        key: "has",
+        value: function has(query) {
+            return this.get(query) !== null;
+        }
+    }, {
+        key: "resolve",
+        value: function resolve(query, resolver) {
+            if (!this.has(query)) {
+                this.set(query, resolver());
+            }
+
+            return this.get(query);
+        }
+    }, {
+        key: "empty",
+        value: function empty() {
+            this[_data] = {};
+            return this;
+        }
+    }, {
+        key: "isEmpty",
+        value: function isEmpty() {
+            return Object.keys(this[_data]).length === 0;
         }
     }]);
 
-    return IndexModule;
-}(_wrapper.Module);
+    return Scope;
+}();
 
-exports.default = IndexModule;
+/*
+ -------------------------------
+ Exports
+ -------------------------------
+ */
 
-},{"wrapper6":57}],63:[function(require,module,exports){
+exports.queryObject = queryObject;
+exports.createScope = createScope;
+exports.Scope = Scope;
+},{"es6-map":47,"es6-symbol":54}],69:[function(require,module,exports){
 "use strict";
 
-Object.defineProperty(exports, "__esModule", {
-    value: true
+var app = require("wrapper6");
+
+// Globalize wrapper as app (for dev purpose)
+window.app = app;
+
+// Wrapper 6 configuration
+app.config.set({
+    // Specifies whether to log errors to console or not (defaults: true)
+    debug: true,
+
+    // Amount of time in milliseconds until a package times out and throws and error (defaults: 5000)
+    package_timeout: 2500
 });
 
+// Passing options has been migrated from the app to modules
+// e.g.
+app.define("options", app.scope({
+    // put your options here
+}));
+
+// Load modules on document ready
+app.ready(function () {
+    // Document is ready here
+    // We must use node's require here because the es6 import is only allowed
+    // at the top of the document
+    require("./modules/index");
+    require("./modules/messages");
+    require("./modules/logger");
+});
+
+},{"./modules/index":70,"./modules/logger":71,"./modules/messages":72,"wrapper6":64}],70:[function(require,module,exports){
+"use strict";
+
+var app = require("wrapper6");
+
+/*
+ -------------------------------
+ Unnamed module registered using `define`
+ -------------------------------
+ */
+
+app.define(function () {
+
+    // The index module will only boot if the body contains the index class
+    if (!document.body.classList.contains("index")) {
+        return false;
+    }
+
+    // Initialize element
+    var description = document.createElement("div");
+    description.id = "description";
+    description.innerText = "Index module has loaded and it is ready.";
+
+    document.body.appendChild(description);
+});
+
+},{"wrapper6":64}],71:[function(require,module,exports){
+"use strict";
+
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
-
-var _wrapper = require("wrapper6");
-
-var _es6Promise = require("es6-promise");
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
 
-function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; } /*
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                Dependencies
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                */
+function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
+
+var app = require("wrapper6");
+
+var _require = require("es6-promise"),
+    Promise = _require.Promise;
 
 /*
- Module
+ -------------------------------
+ Named module registered using `use`
+ -------------------------------
  */
 
-var LoggerModule = function (_Module) {
-    _inherits(LoggerModule, _Module);
+var LoggerModule = function (_app$Module) {
+    _inherits(LoggerModule, _app$Module);
 
     function LoggerModule() {
         _classCallCheck(this, LoggerModule);
@@ -3539,13 +3889,12 @@ var LoggerModule = function (_Module) {
 
     _createClass(LoggerModule, [{
         key: "boot",
-        value: function boot(app) {
+        value: function boot() {
             var _this2 = this;
 
             // The log module will take some time to boot
-            return new _es6Promise.Promise(function (resolve) {
+            return new Promise(function (resolve) {
                 setTimeout(function () {
-
                     // Append the textarea to body
                     _this2.element = document.createElement("textarea");
                     _this2.element.id = "log";
@@ -3553,7 +3902,7 @@ var LoggerModule = function (_Module) {
                     document.body.appendChild(_this2.element);
 
                     resolve();
-                }, app.options.get("logger.delay", 1000));
+                }, 1000);
             });
         }
     }, {
@@ -3570,78 +3919,50 @@ var LoggerModule = function (_Module) {
     }]);
 
     return LoggerModule;
-}(_wrapper.Module);
-
-exports.default = LoggerModule;
-
-},{"es6-promise":48,"wrapper6":57}],64:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
-
-var _wrapper = require("wrapper6");
-
-var _es6Promise = require("es6-promise");
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
-
-function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; } /*
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                Dependencies
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                */
+}(app.Module);
 
 /*
- Module
+ -------------------------------
+ Register
+ -------------------------------
  */
 
-var MessagesModule = function (_Module) {
-    _inherits(MessagesModule, _Module);
 
-    function MessagesModule() {
-        _classCallCheck(this, MessagesModule);
+app.use("logger", LoggerModule);
 
-        return _possibleConstructorReturn(this, (MessagesModule.__proto__ || Object.getPrototypeOf(MessagesModule)).apply(this, arguments));
-    }
+},{"es6-promise":53,"wrapper6":64}],72:[function(require,module,exports){
+"use strict";
 
-    _createClass(MessagesModule, [{
-        key: "boot",
-        value: function boot(app) {
-            // The messages module depend on the logger module to be booted
-            return app.require(["logger"]).then(function (_ref) {
-                var logger = _ref.logger;
+var app = require("wrapper6");
 
-                // Load some messages
-                return new _es6Promise.Promise(function (resolve) {
-                    setTimeout(function () {
-                        resolve({
-                            logger: logger,
-                            messages: app.options.get("messages.list", [])
-                        });
-                    }, app.options.get("messages.delay", 2000));
-                });
-            });
-        }
-    }, {
-        key: "ready",
-        value: function ready(app, _ref2) {
-            var logger = _ref2.logger,
-                messages = _ref2.messages;
+/*
+ -------------------------------
+ Name module with requirements registered using `define`
+ -------------------------------
+ */
 
+app.define("messages", ["logger"], function (_ref) {
+    var logger = _ref.logger;
+
+
+    // Define some messages
+    var messages = ["Hello", "How are you doing?"];
+
+    // Define the module controller
+    var module = {
+        writeAll: function writeAll() {
             messages.forEach(function (message) {
                 logger.log(message);
             });
         }
-    }]);
+    };
 
-    return MessagesModule;
-}(_wrapper.Module);
+    // Write all on initialization
+    module.writeAll();
 
-exports.default = MessagesModule;
+    // Export controller
+    return module;
+});
 
-},{"es6-promise":48,"wrapper6":57}]},{},[61])
+},{"wrapper6":64}]},{},[69])
 
