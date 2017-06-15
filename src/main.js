@@ -15,9 +15,11 @@ app.config.set({
 
 // Passing options has been migrated from the app to modules
 // e.g.
-app.define("options", app.scope({
-    // put your options here
-}));
+app.define("options", () => {
+    return app.scope({
+        // put your options here
+    });
+});
 
 // Load modules on document ready
 app.ready(() => {
