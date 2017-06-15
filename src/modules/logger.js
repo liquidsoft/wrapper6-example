@@ -4,6 +4,7 @@ const {Promise} = require("es6-promise");
 /*
  -------------------------------
  Named module registered using `use`
+ NOTE: Please avoid this approach as I plan to remove it. Use app.define instead.
  -------------------------------
  */
 
